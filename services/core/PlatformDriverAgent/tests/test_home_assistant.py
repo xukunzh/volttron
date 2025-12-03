@@ -153,3 +153,177 @@ def platform_driver(volttron_instance):
     volttron_instance.stop_agent(platform_uuid)
     if not volttron_instance.debug_mode:
         volttron_instance.remove_agent(platform_uuid)
+
+# ==================== Switch Device Tests ====================
+
+def test_switch_turn_on(volttron_instance, config_store_switch):
+    """
+    Test turning on a switch device.
+    
+    Verifies that the set_point RPC call successfully turns on the switch
+    and the state is correctly updated to 1 (on).
+    """
+    agent = volttron_instance.dynamic_agent
+    
+    # Turn on the switch
+    agent.vip.rpc.call(
+        PLATFORM_DRIVER, 
+        'set_point', 
+        'home_assistant_switch', 
+        'switch_state', 
+        1
+    ).get(timeout=20)
+    
+    # Wait for the change to propagate
+    gevent.sleep(5)
+    
+    # Verify the switch is on
+    result = agent.vip.rpc.call(
+        PLATFORM_DRIVER, 
+        'get_point', 
+        'home_assistant_switch', 
+        'switch_state'
+    ).get(timeout=20)
+    
+    assert result == 1, f"Expected switch to be on (1), but got {result}"
+
+
+def test_switch_turn_off(volttron_instance, config_store_switch):
+    """
+    Test turning off a switch device.
+    
+    Verifies that the set_point RPC call successfully turns off the switch
+    and the state is correctly updated to 0 (off).
+    """
+    agent = volttron_instance.dynamic_agent
+    
+    # Turn off the switch
+    agent.vip.rpc.call(
+        PLATFORM_DRIVER, 
+        'set_point', 
+        'home_assistant_switch', 
+        'switch_state', 
+        0
+    ).get(timeout=20)
+    
+    # Wait for the change to propagate
+    gevent.sleep(5)
+    
+    # Verify the switch is off
+    result = agent.vip.rpc.call(
+        PLATFORM_DRIVER, 
+        'get_point', 
+        'home_assistant_switch', 
+        'switch_state'
+    ).get(timeout=20)
+    
+    assert result == 0, f"Expected switch to be off (0), but got {result}"
+
+
+def test_switch_scrape_all(volttron_instance, config_store_switch):
+    """
+    Test that switch data appears correctly in scrape_all results.
+    
+    Verifies that scrape_all includes the switch_state point with a valid value.
+    """
+    agent = volttron_instance.dynamic_agent
+    
+    # Get all data points
+    result = agent.vip.rpc.call(
+        PLATFORM_DRIVER, 
+        'scrape_all', 
+        'home_assistant_switch'
+    ).get(timeout=20)
+    
+    # Verify switch_state is in results
+    assert 'switch_state' in result, \
+        f"switch_state not found in scrape_all results. Got: {result.keys()}"
+    
+    # Verify the value is valid (0 or 1)
+    switch_state = result['switch_state']
+    assert switch_state in [0, 1], \
+        f"Invalid switch state: {switch_state}. Expected 0 or 1"
+
+
+# ==================== Config Store Fixture for Switch ====================
+
+@pytest.fixture(scope="function")
+def config_store_switch(volttron_instance, platform_driver):
+    """
+    Configure a switch device for testing.
+    
+    Creates registry and device configurations for a test switch,
+    loads them into the config store, and cleans up after the test.
+    
+    Note: Requires a Home Assistant instance with a switch entity
+    named 'switch.test_switch'. Update HOMEASSISTANT_TEST_IP, 
+    ACCESS_TOKEN, and PORT at the top of this file.
+    """
+    capabilities = [{"edit_config_store": {"identity": PLATFORM_DRIVER}}]
+    volttron_instance.add_capabilities(
+        volttron_instance.dynamic_agent.core.publickey, 
+        capabilities
+    )
+    
+    # Registry configuration for switch
+    registry_config = "switch_test.json"
+    registry_obj = [{
+        "Entity ID": "switch.test_switch",
+        "Entity Point": "state",
+        "Volttron Point Name": "switch_state",
+        "Units": "On / Off",
+        "Units Details": "0: off, 1: on",
+        "Writable": True,
+        "Starting Value": 0,
+        "Type": "int",
+        "Notes": "Test switch device for integration testing"
+    }]
+    
+    # Store registry config
+    volttron_instance.dynamic_agent.vip.rpc.call(
+        CONFIGURATION_STORE,
+        "manage_store",
+        PLATFORM_DRIVER,
+        registry_config,
+        json.dumps(registry_obj),
+        config_type="json"
+    )
+    
+    gevent.sleep(2)
+    
+    # Device configuration
+    device_topic = "devices/home_assistant_switch"
+    driver_config = {
+        "driver_config": {
+            "ip_address": HOMEASSISTANT_TEST_IP, 
+            "access_token": ACCESS_TOKEN, 
+            "port": PORT
+        },
+        "driver_type": "home_assistant",
+        "registry_config": f"config://{registry_config}",
+        "timezone": "US/Pacific",
+        "interval": 30,
+    }
+    
+    # Store device config
+    volttron_instance.dynamic_agent.vip.rpc.call(
+        CONFIGURATION_STORE,
+        "manage_store",
+        PLATFORM_DRIVER,
+        device_topic,
+        json.dumps(driver_config),
+        config_type="json"
+    )
+    
+    gevent.sleep(5)  # Wait for config to load
+    
+    yield platform_driver
+    
+    # Cleanup
+    print("Cleaning up switch test configuration...")
+    volttron_instance.dynamic_agent.vip.rpc.call(
+        CONFIGURATION_STORE, 
+        "manage_delete_store", 
+        PLATFORM_DRIVER
+    )
+    gevent.sleep(0.1)
