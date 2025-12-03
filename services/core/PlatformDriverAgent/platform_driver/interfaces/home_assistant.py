@@ -194,6 +194,31 @@ class Interface(BasicRevert, BaseInterface):
                 error_msg = f"Currently, switches only support state control"
                 _log.error(error_msg)
                 raise ValueError(error_msg)
+        # Handling media player states
+        # Media players have various states: playing, paused, idle, off, etc.
+        elif "media_player." in entity_id:
+            if entity_point == "state":
+                state = entity_data.get("state", None)
+                # Map media player states to numbers
+                # off=0, idle=0, paused=1, playing=2
+                if state in ["off", "idle", "unavailable"]:
+                    register.value = 0
+                    result[register.point_name] = 0
+                elif state == "paused":
+                    register.value = 1
+                    result[register.point_name] = 1
+                elif state == "playing":
+                    register.value = 2
+                    result[register.point_name] = 2
+                else:
+                    # Unknown state, store as string
+                    register.value = state
+                    result[register.point_name] = state
+            else:
+                # For other attributes (volume_level, media_title, etc.)
+                attribute = entity_data.get("attributes", {}).get(f"{entity_point}", 0)
+                register.value = attribute
+                result[register.point_name] = attribute
         else:
             error_msg = f"Unsupported entity_id: {register.entity_id}. " \
                         f"Currently set_point is supported only for thermostats and lights"
@@ -422,7 +447,7 @@ class Interface(BasicRevert, BaseInterface):
         else:
             print(f"Failed to set {entity_id} to {state}: {response.text}")
 
-    def turn_on_switch(self, entity_id):
+    def turn_on_switch(self, entity_id: str) -> None:
         """Turn on a switch device in Home Assistant."""
         url = f"http://{self.ip_address}:{self.port}/api/services/switch/turn_on"
         headers = {
@@ -441,3 +466,114 @@ class Interface(BasicRevert, BaseInterface):
         }
         payload = {"entity_id": entity_id}
         _post_method(url, headers, payload, f"turn off switch {entity_id}")
+    
+    def media_play(self, entity_id):
+        """
+        Start or resume playback on a media player.
+        """
+        if not entity_id.startswith("media_player."):
+            error_msg = f"{entity_id} is not a valid media player entity ID"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+            
+        url = f"http://{self.ip_address}:{self.port}/api/services/media_player/media_play"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {"entity_id": entity_id}
+        _post_method(url, headers, payload, f"play media on {entity_id}")
+
+    def media_pause(self, entity_id):
+        """
+        Pause playback on a media player.
+        """
+        if not entity_id.startswith("media_player."):
+            error_msg = f"{entity_id} is not a valid media player entity ID"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+            
+        url = f"http://{self.ip_address}:{self.port}/api/services/media_player/media_pause"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {"entity_id": entity_id}
+        _post_method(url, headers, payload, f"pause media on {entity_id}")
+
+    def media_stop(self, entity_id):
+        """
+        Stop playback on a media player.
+        """
+        if not entity_id.startswith("media_player."):
+            error_msg = f"{entity_id} is not a valid media player entity ID"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+            
+        url = f"http://{self.ip_address}:{self.port}/api/services/media_player/media_stop"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {"entity_id": entity_id}
+        _post_method(url, headers, payload, f"stop media on {entity_id}")
+
+    def set_media_volume(self, entity_id, volume_level):
+        """
+        Set the volume level of a media player.
+        """
+        if not entity_id.startswith("media_player."):
+            error_msg = f"{entity_id} is not a valid media player entity ID"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+            
+        # Validate volume range
+        if not isinstance(volume_level, (int, float)) or not 0.0 <= volume_level <= 1.0:
+            error_msg = f"Volume level must be between 0.0 and 1.0, got {volume_level}"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+            
+        url = f"http://{self.ip_address}:{self.port}/api/services/media_player/volume_set"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "entity_id": entity_id,
+            "volume_level": float(volume_level)
+        }
+        _post_method(url, headers, payload, f"set volume of {entity_id} to {volume_level}")
+
+    def media_next_track(self, entity_id):
+        """
+        Skip to next track on a media player.
+        """
+        if not entity_id.startswith("media_player."):
+            error_msg = f"{entity_id} is not a valid media player entity ID"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+            
+        url = f"http://{self.ip_address}:{self.port}/api/services/media_player/media_next_track"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {"entity_id": entity_id}
+        _post_method(url, headers, payload, f"next track on {entity_id}")
+
+    def media_previous_track(self, entity_id):
+        """
+        Skip to previous track on a media player.
+        """
+        if not entity_id.startswith("media_player."):
+            error_msg = f"{entity_id} is not a valid media player entity ID"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+            
+        url = f"http://{self.ip_address}:{self.port}/api/services/media_player/media_previous_track"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {"entity_id": entity_id}
+        _post_method(url, headers, payload, f"previous track on {entity_id}")

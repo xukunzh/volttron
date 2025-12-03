@@ -327,3 +327,260 @@ def config_store_switch(volttron_instance, platform_driver):
         PLATFORM_DRIVER
     )
     gevent.sleep(0.1)
+
+    # ==================== Media Player Device Tests ====================
+
+def test_media_player_play(volttron_instance, config_store_media):
+    """Test starting playback on a media player."""
+    agent = volttron_instance.dynamic_agent
+    
+    # Start playback
+    agent.vip.rpc.call(
+        PLATFORM_DRIVER,
+        'set_point',
+        'home_assistant_media',
+        'media_state',
+        2  # 2 = play
+    ).get(timeout=20)
+    
+    gevent.sleep(5)
+    
+    # Verify state
+    result = agent.vip.rpc.call(
+        PLATFORM_DRIVER,
+        'get_point',
+        'home_assistant_media',
+        'media_state'
+    ).get(timeout=20)
+    
+    assert result == 2, f"Expected media player to be playing (2), got {result}"
+
+
+def test_media_player_pause(volttron_instance, config_store_media):
+    """Test pausing playback on a media player."""
+    agent = volttron_instance.dynamic_agent
+    
+    # Pause playback
+    agent.vip.rpc.call(
+        PLATFORM_DRIVER,
+        'set_point',
+        'home_assistant_media',
+        'media_state',
+        1  # 1 = pause
+    ).get(timeout=20)
+    
+    gevent.sleep(5)
+    
+    # Verify state
+    result = agent.vip.rpc.call(
+        PLATFORM_DRIVER,
+        'get_point',
+        'home_assistant_media',
+        'media_state'
+    ).get(timeout=20)
+    
+    assert result == 1, f"Expected media player to be paused (1), got {result}"
+
+
+def test_media_player_stop(volttron_instance, config_store_media):
+    """Test stopping playback on a media player."""
+    agent = volttron_instance.dynamic_agent
+    
+    # Stop playback
+    agent.vip.rpc.call(
+        PLATFORM_DRIVER,
+        'set_point',
+        'home_assistant_media',
+        'media_state',
+        0  # 0 = stop
+    ).get(timeout=20)
+    
+    gevent.sleep(5)
+    
+    # Verify state
+    result = agent.vip.rpc.call(
+        PLATFORM_DRIVER,
+        'get_point',
+        'home_assistant_media',
+        'media_state'
+    ).get(timeout=20)
+    
+    assert result == 0, f"Expected media player to be stopped (0), got {result}"
+
+
+def test_media_player_set_volume(volttron_instance, config_store_media):
+    """Test setting volume on a media player."""
+    agent = volttron_instance.dynamic_agent
+    
+    # Set volume to 50%
+    agent.vip.rpc.call(
+        PLATFORM_DRIVER,
+        'set_point',
+        'home_assistant_media',
+        'media_volume',
+        0.5
+    ).get(timeout=20)
+    
+    gevent.sleep(5)
+    
+    # Verify volume
+    result = agent.vip.rpc.call(
+        PLATFORM_DRIVER,
+        'get_point',
+        'home_assistant_media',
+        'media_volume'
+    ).get(timeout=20)
+    
+    assert abs(result - 0.5) < 0.01, f"Expected volume 0.5, got {result}"
+
+
+def test_media_player_next_track(volttron_instance, config_store_media):
+    """Test skipping to next track on a media player."""
+    agent = volttron_instance.dynamic_agent
+    
+    # Next track
+    agent.vip.rpc.call(
+        PLATFORM_DRIVER,
+        'set_point',
+        'home_assistant_media',
+        'media_next',
+        1  # Any value triggers action
+    ).get(timeout=20)
+    
+    gevent.sleep(3)
+    
+    # Test passes if no exception is raised
+    # (We can't easily verify track changed without knowing media content)
+    assert True
+
+
+def test_media_player_scrape_all(volttron_instance, config_store_media):
+    """Test that media player data appears in scrape_all."""
+    agent = volttron_instance.dynamic_agent
+    
+    result = agent.vip.rpc.call(
+        PLATFORM_DRIVER,
+        'scrape_all',
+        'home_assistant_media'
+    ).get(timeout=20)
+    
+    # Verify media player points are present
+    assert 'media_state' in result, f"media_state not found in results"
+    assert 'media_volume' in result, f"media_volume not found in results"
+    
+    # Verify state is valid
+    media_state = result['media_state']
+    assert media_state in [0, 1, 2] or isinstance(media_state, str), \
+        f"Invalid media state: {media_state}"
+
+
+# ==================== Config Store Fixture for Media Player ====================
+
+@pytest.fixture(scope="function")
+def config_store_media(volttron_instance, platform_driver):
+    """
+    Configure a media player device for testing.
+    
+    Creates registry and device configurations for a test media player.
+    """
+    capabilities = [{"edit_config_store": {"identity": PLATFORM_DRIVER}}]
+    volttron_instance.add_capabilities(
+        volttron_instance.dynamic_agent.core.publickey,
+        capabilities
+    )
+    
+    # Registry configuration for media player
+    registry_config = "media_player_test.json"
+    registry_obj = [
+        {
+            "Entity ID": "media_player.test_player",
+            "Entity Point": "state",
+            "Volttron Point Name": "media_state",
+            "Units": "Enumeration",
+            "Units Details": "0: stop/off, 1: pause, 2: play",
+            "Writable": True,
+            "Starting Value": 0,
+            "Type": "int",
+            "Notes": "Media player playback state"
+        },
+        {
+            "Entity ID": "media_player.test_player",
+            "Entity Point": "volume_level",
+            "Volttron Point Name": "media_volume",
+            "Units": "Percentage",
+            "Units Details": "0.0 to 1.0",
+            "Writable": True,
+            "Starting Value": 0.5,
+            "Type": "float",
+            "Notes": "Media player volume control"
+        },
+        {
+            "Entity ID": "media_player.test_player",
+            "Entity Point": "next_track",
+            "Volttron Point Name": "media_next",
+            "Units": "Action",
+            "Units Details": "Any value triggers action",
+            "Writable": True,
+            "Type": "int",
+            "Notes": "Skip to next track"
+        },
+        {
+            "Entity ID": "media_player.test_player",
+            "Entity Point": "previous_track",
+            "Volttron Point Name": "media_previous",
+            "Units": "Action",
+            "Units Details": "Any value triggers action",
+            "Writable": True,
+            "Type": "int",
+            "Notes": "Skip to previous track"
+        }
+    ]
+    
+    # Store registry config
+    volttron_instance.dynamic_agent.vip.rpc.call(
+        CONFIGURATION_STORE,
+        "manage_store",
+        PLATFORM_DRIVER,
+        registry_config,
+        json.dumps(registry_obj),
+        config_type="json"
+    )
+    
+    gevent.sleep(2)
+    
+    # Device configuration
+    device_topic = "devices/home_assistant_media"
+    driver_config = {
+        "driver_config": {
+            "ip_address": HOMEASSISTANT_TEST_IP,
+            "access_token": ACCESS_TOKEN,
+            "port": PORT
+        },
+        "driver_type": "home_assistant",
+        "registry_config": f"config://{registry_config}",
+        "timezone": "US/Pacific",
+        "interval": 30,
+    }
+    
+    # Store device config
+    volttron_instance.dynamic_agent.vip.rpc.call(
+        CONFIGURATION_STORE,
+        "manage_store",
+        PLATFORM_DRIVER,
+        device_topic,
+        json.dumps(driver_config),
+        config_type="json"
+    )
+    
+    gevent.sleep(5)
+    
+    yield platform_driver
+    
+    # Cleanup
+    print("Cleaning up media player test configuration...")
+    volttron_instance.dynamic_agent.vip.rpc.call(
+        CONFIGURATION_STORE,
+        "manage_delete_store",
+        PLATFORM_DRIVER
+    )
+    gevent.sleep(0.1)
