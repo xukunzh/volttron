@@ -116,6 +116,7 @@ class Interface(BasicRevert, BaseInterface):
                 "Trying to write to a point configured read only: " + point_name)
         register.value = register.reg_type(value)  # setting the value
         entity_point = register.entity_point
+        
         # Changing lights values in home assistant based off of register value.
         if "light." in register.entity_id:
             if entity_point == "state":
@@ -173,16 +174,92 @@ class Interface(BasicRevert, BaseInterface):
                     raise ValueError(error_msg)
             elif entity_point == "temperature":
                 self.set_thermostat_temperature(entity_id=register.entity_id, temperature=register.value)
-
             else:
                 error_msg = f"Currently set_point is supported only for thermostats state and temperature {register.entity_id}"
                 _log.error(error_msg)
                 raise ValueError(error_msg)
+        
+        # Changing switch values
+        elif "switch." in register.entity_id:
+            if entity_point == "state":
+                if isinstance(register.value, int) and register.value in [0, 1]:
+                    if register.value == 1:
+                        self.turn_on_switch(register.entity_id)
+                    elif register.value == 0:
+                        self.turn_off_switch(register.entity_id)
+                else:
+                    error_msg = f"State value for {register.entity_id} should be 0 or 1"
+                    _log.error(error_msg)
+                    raise ValueError(error_msg)
+            else:
+                error_msg = f"Currently, switches only support state control"
+                _log.error(error_msg)
+                raise ValueError(error_msg)
+        
+        # Changing media player values
+        elif "media_player." in register.entity_id:
+            if entity_point == "state":
+                if isinstance(register.value, int) and register.value in [0, 1, 2]:
+                    if register.value == 0:
+                        self.media_stop(register.entity_id)
+                    elif register.value == 1:
+                        self.media_pause(register.entity_id)
+                    elif register.value == 2:
+                        self.media_play(register.entity_id)
+                else:
+                    error_msg = f"Media player state should be 0, 1, or 2, got {register.value}"
+                    _log.error(error_msg)
+                    raise ValueError(error_msg)
+            elif entity_point == "volume_level":
+                if isinstance(register.value, (int, float)) and 0.0 <= register.value <= 1.0:
+                    self.set_media_volume(register.entity_id, register.value)
+                else:
+                    error_msg = f"Volume must be between 0.0 and 1.0, got {register.value}"
+                    _log.error(error_msg)
+                    raise ValueError(error_msg)
+            elif entity_point == "next_track":
+                self.media_next_track(register.entity_id)
+            elif entity_point == "previous_track":
+                self.media_previous_track(register.entity_id)
+            else:
+                error_msg = f"Media player supports: state, volume_level, next_track, previous_track. Unsupported: {entity_point}"
+                _log.error(error_msg)
+                raise ValueError(error_msg)
+        
+        # Changing cover values
+        elif "cover." in register.entity_id:
+            if entity_point == "state":
+                if isinstance(register.value, str):
+                    if register.value.lower() == "open":
+                        self.open_cover(register.entity_id)
+                    elif register.value.lower() == "close":
+                        self.close_cover(register.entity_id)
+                    else:
+                        error_msg = f"Cover state must be 'open' or 'close', got {register.value}"
+                        _log.error(error_msg)
+                        raise ValueError(error_msg)
+                else:
+                    error_msg = f"Cover state must be a string"
+                    _log.error(error_msg)
+                    raise ValueError(error_msg)
+            elif entity_point == "position":
+                if isinstance(register.value, (int, float)) and 0 <= register.value <= 100:
+                    self.set_cover_position(register.entity_id, register.value)
+                else:
+                    error_msg = f"Position must be between 0 and 100, got {register.value}"
+                    _log.error(error_msg)
+                    raise ValueError(error_msg)
+            else:
+                error_msg = f"Cover supports 'state' and 'position'. Unsupported: {entity_point}"
+                _log.error(error_msg)
+                raise ValueError(error_msg)
+        
         else:
             error_msg = f"Unsupported entity_id: {register.entity_id}. " \
-                        f"Currently set_point is supported only for thermostats and lights"
+                        f"Currently set_point is supported for lights, input_boolean, climate, switch, media_player, and cover"
             _log.error(error_msg)
             raise ValueError(error_msg)
+        
         return register.value
 
     def get_entity_data(self, point_name):
@@ -236,8 +313,9 @@ class Interface(BasicRevert, BaseInterface):
                         attribute = entity_data.get("attributes", {}).get(f"{entity_point}", 0)
                         register.value = attribute
                         result[register.point_name] = attribute
-                # handling light states
-                elif "light." or "input_boolean." in entity_id: # Checks for lights or input bools since they have the same states.
+                
+                # handling light, input_boolean, and switch states
+                elif "light." in entity_id or "input_boolean." in entity_id or "switch." in entity_id:
                     if entity_point == "state":
                         state = entity_data.get("state", None)
                         # Converting light states to numbers.
@@ -251,9 +329,41 @@ class Interface(BasicRevert, BaseInterface):
                         attribute = entity_data.get("attributes", {}).get(f"{entity_point}", 0)
                         register.value = attribute
                         result[register.point_name] = attribute
-                else:  # handling all devices that are not thermostats or light states
+                
+                # Handling media player states
+                elif "media_player." in entity_id:
                     if entity_point == "state":
-
+                        state = entity_data.get("state", None)
+                        if state in ["off", "idle", "unavailable"]:
+                            register.value = 0
+                            result[register.point_name] = 0
+                        elif state == "paused":
+                            register.value = 1
+                            result[register.point_name] = 1
+                        elif state == "playing":
+                            register.value = 2
+                            result[register.point_name] = 2
+                        else:
+                            register.value = state
+                            result[register.point_name] = state
+                    else:
+                        attribute = entity_data.get("attributes", {}).get(f"{entity_point}", 0)
+                        register.value = attribute
+                        result[register.point_name] = attribute
+                
+                # Handling cover states
+                elif "cover." in entity_id:
+                    if entity_point == "state":
+                        state = entity_data.get("state", None)
+                        register.value = state
+                        result[register.point_name] = state
+                    else:
+                        attribute = entity_data.get("attributes", {}).get(f"{entity_point}", 0)
+                        register.value = attribute
+                        result[register.point_name] = attribute
+                
+                else:  # handling all other devices
+                    if entity_point == "state":
                         state = entity_data.get("state", None)
                         register.value = state
                         result[register.point_name] = state
@@ -405,3 +515,182 @@ class Interface(BasicRevert, BaseInterface):
             print(f"Successfully set {entity_id} to {state}")
         else:
             print(f"Failed to set {entity_id} to {state}: {response.text}")
+
+    # ==================== Switch Methods ====================
+    
+    def turn_on_switch(self, entity_id):
+        """Turn on a switch device in Home Assistant."""
+        url = f"http://{self.ip_address}:{self.port}/api/services/switch/turn_on"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {"entity_id": entity_id}
+        _post_method(url, headers, payload, f"turn on switch {entity_id}")
+
+    def turn_off_switch(self, entity_id):
+        """Turn off a switch device in Home Assistant."""
+        url = f"http://{self.ip_address}:{self.port}/api/services/switch/turn_off"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {"entity_id": entity_id}
+        _post_method(url, headers, payload, f"turn off switch {entity_id}")
+    
+    # ==================== Media Player Methods ====================
+    
+    def media_play(self, entity_id):
+        """Start or resume playback on a media player."""
+        if not entity_id.startswith("media_player."):
+            error_msg = f"{entity_id} is not a valid media player entity ID"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+            
+        url = f"http://{self.ip_address}:{self.port}/api/services/media_player/media_play"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {"entity_id": entity_id}
+        _post_method(url, headers, payload, f"play media on {entity_id}")
+
+    def media_pause(self, entity_id):
+        """Pause playback on a media player."""
+        if not entity_id.startswith("media_player."):
+            error_msg = f"{entity_id} is not a valid media player entity ID"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+            
+        url = f"http://{self.ip_address}:{self.port}/api/services/media_player/media_pause"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {"entity_id": entity_id}
+        _post_method(url, headers, payload, f"pause media on {entity_id}")
+
+    def media_stop(self, entity_id):
+        """Stop playback on a media player."""
+        if not entity_id.startswith("media_player."):
+            error_msg = f"{entity_id} is not a valid media player entity ID"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+            
+        url = f"http://{self.ip_address}:{self.port}/api/services/media_player/media_stop"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {"entity_id": entity_id}
+        _post_method(url, headers, payload, f"stop media on {entity_id}")
+
+    def set_media_volume(self, entity_id, volume_level):
+        """Set the volume level of a media player."""
+        if not entity_id.startswith("media_player."):
+            error_msg = f"{entity_id} is not a valid media player entity ID"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+            
+        # Validate volume range
+        if not isinstance(volume_level, (int, float)) or not 0.0 <= volume_level <= 1.0:
+            error_msg = f"Volume level must be between 0.0 and 1.0, got {volume_level}"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+            
+        url = f"http://{self.ip_address}:{self.port}/api/services/media_player/volume_set"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "entity_id": entity_id,
+            "volume_level": float(volume_level)
+        }
+        _post_method(url, headers, payload, f"set volume of {entity_id} to {volume_level}")
+
+    def media_next_track(self, entity_id):
+        """Skip to next track on a media player."""
+        if not entity_id.startswith("media_player."):
+            error_msg = f"{entity_id} is not a valid media player entity ID"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+            
+        url = f"http://{self.ip_address}:{self.port}/api/services/media_player/media_next_track"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {"entity_id": entity_id}
+        _post_method(url, headers, payload, f"next track on {entity_id}")
+
+    def media_previous_track(self, entity_id):
+        """Skip to previous track on a media player."""
+        if not entity_id.startswith("media_player."):
+            error_msg = f"{entity_id} is not a valid media player entity ID"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+            
+        url = f"http://{self.ip_address}:{self.port}/api/services/media_player/media_previous_track"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {"entity_id": entity_id}
+        _post_method(url, headers, payload, f"previous track on {entity_id}")
+    
+    # ==================== Cover Methods ====================
+    
+    def open_cover(self, entity_id):
+        """Open a cover device (curtain, blind, garage door)."""
+        if not entity_id.startswith("cover."):
+            error_msg = f"{entity_id} is not a valid cover entity ID"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+            
+        url = f"http://{self.ip_address}:{self.port}/api/services/cover/open_cover"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {"entity_id": entity_id}
+        _post_method(url, headers, payload, f"open cover {entity_id}")
+
+    def close_cover(self, entity_id):
+        """Close a cover device (curtain, blind, garage door)."""
+        if not entity_id.startswith("cover."):
+            error_msg = f"{entity_id} is not a valid cover entity ID"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+            
+        url = f"http://{self.ip_address}:{self.port}/api/services/cover/close_cover"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {"entity_id": entity_id}
+        _post_method(url, headers, payload, f"close cover {entity_id}")
+
+    def set_cover_position(self, entity_id, position):
+        """Set the position of a cover device."""
+        if not entity_id.startswith("cover."):
+            error_msg = f"{entity_id} is not a valid cover entity ID"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+            
+        # Validate position range
+        if not isinstance(position, (int, float)) or not 0 <= position <= 100:
+            error_msg = f"Position must be between 0 and 100, got {position}"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+            
+        url = f"http://{self.ip_address}:{self.port}/api/services/cover/set_cover_position"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "entity_id": entity_id,
+            "position": int(position)
+        }
+        _post_method(url, headers, payload, f"set position of {entity_id} to {position}")
